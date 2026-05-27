@@ -1,0 +1,35 @@
+root = true
+
+[*]
+indent_style = tab
+indent_size = 5
+tab_width = 5
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# YAML disallows tabs in indentation per spec - must use spaces
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# JSON: spaces to match ecosystem tooling (Prettier, tsc, package managers)
+[*.{json,jsonc}]
+indent_style = space
+indent_size = 2
+
+# Markdown: spaces and preserve trailing whitespace (used for hard line breaks)
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# Makefile recipe lines require literal tab characters by definition
+[Makefile]
+indent_style = tab
+
+# CMake convention is spaces; tooling like cmake-format expects them
+[{CMakeLists.txt,*.cmake}]
+indent_style = space
+indent_size = 2

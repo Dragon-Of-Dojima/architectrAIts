@@ -1,0 +1,22 @@
+{
+  "name": "architectraits",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ArchitectrAIts - a traditional-architecture exploration platform with AI-powered search, descriptions, chat, and visitor upload analysis.",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\""
+  },
+  "devDependencies": {}
+}

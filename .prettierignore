@@ -1,0 +1,10 @@
+node_modules
+pnpm-lock.yaml
+dist
+build
+.next
+.turbo
+*.tsbuildinfo
+coverage
+infra/aws/cdk.out
+packages/imgcore-wasm/build
