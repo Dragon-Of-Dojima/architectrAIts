@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import type { HealthResponse } from 'architectraits-shared';
 import cors from 'cors';
 
 const app = express();
@@ -16,7 +17,7 @@ app.use(express.json());
 // 	res.json({ status: 'ok', uptime: process.uptime() });
 // });
  //could also do what's below **
- app.get('/health', (_req: Request, res: Response<{ status: string; uptime: number }>) => {
+ app.get('/health', (_req: Request, res: Response<HealthResponse>) => {
 	res.json({ status: 'ok', uptime: process.uptime() });
 });
 app.listen(PORT, function () {

@@ -1,0 +1,4 @@
+import {z} from 'zod';
+export const healthResponseScheme = z.object({status: z.literal('ok'), uptime: z.number()});
+
+export type HealthResponse = z.infer<typeof healthResponseScheme>;
