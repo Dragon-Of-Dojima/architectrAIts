@@ -1,0 +1,49 @@
+# Development-only stack: Postgres (with pgvector) + Redis.
+# Apps (web/api/worker) run on the host via `pnpm dev`; only the
+# stateful services live in containers here.
+#
+# Usage (from repo root):
+#   pnpm db:up      # start in background
+#   pnpm db:down    # stop, keep data
+#   pnpm db:reset   # stop AND delete data volume (destructive)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: architectraits-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-architect}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-architectraits}
+    ports:
+      # Bound to localhost only - never exposed on the LAN.
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Scripts in this dir run once, only when the data volume is first created.
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-architect} -d ${POSTGRES_DB:-architectraits}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: architectraits-redis-dev
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  redis_data:

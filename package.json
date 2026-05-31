@@ -16,7 +16,11 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "db:up": "docker compose -f infra/docker/docker-compose.dev.yml --env-file infra/docker/.env up -d",
+    "db:down": "docker compose -f infra/docker/docker-compose.dev.yml --env-file infra/docker/.env down",
+    "db:reset": "docker compose -f infra/docker/docker-compose.dev.yml --env-file infra/docker/.env down -v",
+    "db:logs": "docker compose -f infra/docker/docker-compose.dev.yml logs -f"
   },
   "devDependencies": {
     "prettier": "^3.8.3"
