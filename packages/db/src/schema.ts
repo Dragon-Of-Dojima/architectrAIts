@@ -1,1 +1,22 @@
 import { pgTable, uuid, text, integer, boolean, timestamp } from 'drizzle-orm/pg-core';
+
+export const buildings = pgTable('buildings', { 
+	id : uuid('id').primaryKey().defaultRandom(),
+	title: text('title').notNull(),
+	slug: text('slug').notNull().unique(),
+	era: text('era'),
+	primary_style: text('primary_style'),
+	yearBuiltEstimate: integer('year_built_estimate'),
+	sourceUrl: text('source_url'),
+	license: text('license'),
+	editedByHuman: boolean('edited_by_human').notNull().default(false),
+	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow() 
+});
+export const images = pgTable('images', { 
+	id: uuid('id').primaryKey().defaultRandom(),
+	buildingId: uuid('building_id').notNull().references(() => buildings.id, { onDelete: 'cascade' }),
+	s3Key: text('s3_key').notNull(),
+	width: integer('width'),
+	height: integer('height'),
+	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow()
+});
