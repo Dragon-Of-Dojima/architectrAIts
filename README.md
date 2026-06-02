@@ -55,23 +55,29 @@ All on AWS: a single Lightsail instance running Docker Compose, reading from an 
 
 ```mermaid
 flowchart TB
-    DNS[GoDaddy DNS<br/>architectraits.andrewtimothydev.com] --> Cad
+    DNS[GoDaddy DNS<br/>architectraits.andrewtimothydev.com] --> NGINX
 
-    subgraph LS[Lightsail instance · 2GB · Docker Compose]
-        Cad[caddy] --> Web[web · standalone Next]
-        Web --> PG[(postgres + pgvector)]
-        Web --> R[(redis)]
-        Mig[migrator · on-demand]-. seeds .-> PG
+    subgraph LS[Lightsail instance · 2GB]
+        NGINX[host nginx<br/>TLS · reverse proxy]
+        subgraph DC[Docker Compose]
+            Web[web · standalone Next]
+            PG[(postgres + pgvector)]
+            R[(redis)]
+            Mig[migrator · on-demand]-. seeds .-> PG
+        end
+        NGINX -->|127.0.0.1:3300| Web
+        Web --> PG
+        Web --> R
     end
 
     Web --> IAM([IAM user · read-only S3])
     IAM --> S3[(S3 bucket · same AWS account)]
 ```
 
-- One Compose stack: `caddy` → `web` → `postgres` + `redis`, plus an on-demand `migrator` for migrate + seed.
+- The Compose stack is `web` + `postgres` + `redis`, plus an on-demand `migrator` for migrate + seed. The `web` container is published on `127.0.0.1:3300` only.
+- **TLS/ingress is the host's existing nginx** (shared with other sites on the box); a server block reverse-proxies the subdomain to the web container, with the cert issued via certbot (see `infra/nginx/architectraits.conf`).
 - The `web` image is a **standalone** Next build (multi-stage from the monorepo; no `node_modules` at runtime).
 - AWS access is a **least-privilege IAM user** scoped read-only to the one bucket; keys live in `infra/docker/.env.prod` on the box (gitignored).
-- Caddy obtains and renews TLS automatically via Let's Encrypt.
 
 ---
 
@@ -103,11 +109,20 @@ AWS credentials for local dev are read from `~/.aws` via the default credential 
 On the instance, with `infra/docker/.env.prod` filled in (`POSTGRES_PASSWORD` + IAM keys):
 
 ```bash
-# build + start the full stack
+# build + start the stack (web published on 127.0.0.1:3300)
 docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod up -d --build
 
 # one-off migrate + seed
 docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm migrator
+```
+
+Then wire it into the host's nginx and get a cert:
+
+```bash
+sudo cp infra/nginx/architectraits.conf /etc/nginx/sites-available/architectraits.andrewtimothydev.com
+sudo ln -s /etc/nginx/sites-available/architectraits.andrewtimothydev.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d architectraits.andrewtimothydev.com
 ```
 
 Then visit `https://architectraits.andrewtimothydev.com`.

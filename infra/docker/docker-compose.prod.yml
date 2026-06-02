@@ -1,5 +1,8 @@
 # Production stack for a single Lightsail instance:
-#   Postgres (pgvector) + Redis + Next app (standalone) + Caddy (auto-HTTPS).
+#   Postgres (pgvector) + Redis + Next app (standalone).
+#
+# TLS/ingress is handled by the host's existing nginx, which reverse-proxies the
+# subdomain to the web container published on 127.0.0.1:3300 (see infra/nginx/).
 #
 # Usage (from repo root), always passing the prod env file so that ${VARS}
 # below interpolate correctly:
@@ -57,22 +60,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    expose:
-      - '3300'
-
-  caddy:
-    image: caddy:2
-    container_name: architectraits-caddy
-    restart: unless-stopped
+    # Published on localhost only; the host's nginx reverse-proxies to it.
+    # Not exposed publicly (the Lightsail firewall doesn't open 3300 anyway).
     ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
+      - '127.0.0.1:3300:3300'
 
   # Run on demand only (profile: tools). Uses the build image, which has the
   # source + dev deps (drizzle-kit, tsx) needed for migrations + seeding.
@@ -93,5 +84,3 @@ services:
 volumes:
   pg_data:
   redis_data:
-  caddy_data:
-  caddy_config:
