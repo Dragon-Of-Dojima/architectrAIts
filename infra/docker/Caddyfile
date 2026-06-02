@@ -1,0 +1,7 @@
+# Caddy automatically obtains and renews a Let's Encrypt certificate for this
+# domain, as long as ports 80 and 443 are reachable and the DNS A record points
+# at this instance's static IP.
+architectraits.andrewtimothydev.com {
+	encode zstd gzip
+	reverse_proxy web:3300
+}

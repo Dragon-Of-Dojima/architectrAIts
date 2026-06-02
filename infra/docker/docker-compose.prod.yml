@@ -1,0 +1,97 @@
+# Production stack for a single Lightsail instance:
+#   Postgres (pgvector) + Redis + Next app (standalone) + Caddy (auto-HTTPS).
+#
+# Usage (from repo root), always passing the prod env file so that ${VARS}
+# below interpolate correctly:
+#
+#   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod up -d --build
+#
+# One-off DB migrate + seed (reads S3 to (re)build the catalog):
+#
+#   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm migrator
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: architectraits-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-architect}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-architectraits}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Enables the pgvector extension on first init (Phase 2).
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-architect} -d ${POSTGRES_DB:-architectraits}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: architectraits-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: runner
+    container_name: architectraits-web
+    restart: unless-stopped
+    # Supplies S3_BUCKET, AWS_REGION, and AWS credentials to the app.
+    env_file: .env.prod
+    environment:
+      # Internal compose network hostname; overrides anything in .env.prod.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - '3300'
+
+  caddy:
+    image: caddy:2
+    container_name: architectraits-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  # Run on demand only (profile: tools). Uses the build image, which has the
+  # source + dev deps (drizzle-kit, tsx) needed for migrations + seeding.
+  migrator:
+    profiles: ['tools']
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: build
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['sh', '-c', 'pnpm --filter architectraits-db migrate && pnpm --filter architectraits-db seed']
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
