@@ -10,7 +10,10 @@ export const buildings = pgTable('buildings', {
 	sourceUrl: text('source_url'),
 	license: text('license'),
 	editedByHuman: boolean('edited_by_human').notNull().default(false),
-	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow() 
+	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow(),
+	description:text('description'),
+	ai_model:text('ai_model'),
+	ai_processed_at:timestamp('ai_processed_at',{withTimezone:true})
 });
 export const images = pgTable('images', { 
 	id: uuid('id').primaryKey().defaultRandom(),

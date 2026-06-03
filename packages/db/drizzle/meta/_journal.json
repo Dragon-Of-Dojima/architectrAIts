@@ -8,6 +8,13 @@
       "when": 1780260618414,
       "tag": "0000_bored_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780515238680,
+      "tag": "0001_tiresome_squadron_supreme",
+      "breakpoints": true
     }
   ]
 }

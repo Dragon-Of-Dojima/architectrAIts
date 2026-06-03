@@ -12,6 +12,11 @@
 # One-off DB migrate + seed (reads S3 to (re)build the catalog):
 #
 #   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm migrator
+#
+# One-off AI ingest (Phase 2a vision metadata). Run AFTER migrator so the new
+# buildings columns exist, and only once OPENROUTER_API_KEY is set in .env.prod:
+#
+#   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm ingest
 
 services:
   postgres:
@@ -80,6 +85,25 @@ services:
       postgres:
         condition: service_healthy
     command: ['sh', '-c', 'pnpm --filter architectraits-db migrate && pnpm --filter architectraits-db seed']
+
+  # Run on demand only (profile: tools). Calls OpenRouter for vision metadata on
+  # every building with a null ai_processed_at, so it's idempotent and safe to
+  # re-run. Inherits S3_BUCKET/AWS_*/OPENROUTER_* from .env.prod via env_file.
+  # Run AFTER migrator (needs the new buildings columns) and after credits are
+  # funded. Uses the build image (source + tsx + ai deps).
+  ingest:
+    profiles: ['tools']
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: build
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['sh', '-c', 'pnpm --filter architectraits-db ingest']
 
 volumes:
   pg_data:

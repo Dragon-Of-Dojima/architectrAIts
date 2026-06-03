@@ -12,11 +12,13 @@
     "migrate": "drizzle-kit migrate",
     "studio": "drizzle-kit studio",
     "seed": "tsx scripts/seed.ts",
+    "ingest": "tsx scripts/ingest.ts",
     "lint": "echo \"(no lint config yet)\" && exit 0",
     "typecheck": "tsc --noEmit",
     "test": "echo \"(no tests yet)\" && exit 0"
   },
   "dependencies": {
+    "architectraits-ai": "workspace:*",
     "architectraits-storage": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "postgres": "^3.4.5"
