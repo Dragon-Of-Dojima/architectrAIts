@@ -14,8 +14,8 @@ const PROMPT = `You are an architectural historian classifying a photograph of a
 
 Identify the building's traditional architectural style and return a single JSON object with exactly these keys:
 - "primaryStyle": the established, canonical name of the building's architectural style, in Title Case, singular, with no trailing words like "style" or "architecture" (e.g. "Korean Hanok", "Wayo", "Chinese Renaissance", "Second Empire", "Italianate-Eclectic", "Neoclassical", "Art Nouveau"). If the style is unclear, use "Unknown".
-- "era": the historical period or dynasty if identifiable (e.g. "Joseon Dynasty", "Meiji period", "19th century"), otherwise null.
-- "yearBuiltEstimate": your best integer estimate of the year the building was constructed, or null if you cannot estimate.
+- "era": the historical period or dynasty if identifiable (e.g. "Joseon Dynasty", "Edo period", "19th century"), otherwise null.
+- "yearBuiltEstimate": your best integer estimate of the year the building was ORIGINALLY constructed — not the date of any later reconstruction, restoration, or rebuilding. Use null if you cannot estimate.
 - "description": two to three sentences describing the building's notable architectural features.
 
 Respond with ONLY the JSON object. No markdown, no code fences, no commentary.`;
