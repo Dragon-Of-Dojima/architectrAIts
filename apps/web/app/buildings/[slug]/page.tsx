@@ -3,6 +3,7 @@ import { db, buildings, images } from 'architectraits-db';
 import { getPresignedImageUrl } from 'architectraits-storage';
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
+import type { Metadata } from 'next';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,7 @@ export default async function BuildingPage({
 		title: buildings.title,
 		era: buildings.era,
 		primaryStyle: buildings.primary_style,
+		description: buildings.description,
 		yearBuiltEstimate: buildings.yearBuiltEstimate,
 		sourceUrl: buildings.sourceUrl,
 		license: buildings.license,
@@ -42,8 +44,16 @@ export default async function BuildingPage({
 		{/* conditionally render metadata that exists: */}
 		{building.era && <p>Era: {building.era}</p>}
 		{building.primaryStyle && <p>Style: {building.primaryStyle}</p>}
+		{building.description && <p className="mt-4 leading-relaxed">{building.description}</p>}
 		{building.yearBuiltEstimate && <p>Built ~{building.yearBuiltEstimate}</p>}
 		{/* sourceUrl as a link, license as text, etc. */}
 	</main>
   );
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+	const { slug } = await params;
+	const [row] = await db.select({ title: buildings.title })
+	  .from(buildings).where(eq(buildings.slug, slug)).limit(1);
+	return { title: row?.title ?? 'Building' };
 }
