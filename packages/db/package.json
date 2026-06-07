@@ -13,6 +13,7 @@
     "studio": "drizzle-kit studio",
     "seed": "tsx scripts/seed.ts",
     "ingest": "tsx scripts/ingest.ts",
+    "embed": "tsx scripts/embed.ts",
     "lint": "echo \"(no lint config yet)\" && exit 0",
     "typecheck": "tsc --noEmit",
     "test": "echo \"(no tests yet)\" && exit 0"

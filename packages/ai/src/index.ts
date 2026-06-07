@@ -64,3 +64,4 @@ export async function describeBuilding(imageURL: string): Promise<BuildingDescri
 
 	return schema.parse(JSON.parse(raw.slice(start, end + 1)));
 }
+export * from './embed';

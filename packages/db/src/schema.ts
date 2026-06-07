@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, timestamp, vector, index } from 'drizzle-orm/pg-core';
 
 export const buildings = pgTable('buildings', { 
 	id : uuid('id').primaryKey().defaultRandom(),
@@ -13,8 +13,10 @@ export const buildings = pgTable('buildings', {
 	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow(),
 	description:text('description'),
 	ai_model:text('ai_model'),
-	ai_processed_at:timestamp('ai_processed_at',{withTimezone:true})
-});
+	ai_processed_at:timestamp('ai_processed_at',{withTimezone:true}),
+	embedding: vector('embedding',{dimensions:768})
+},(t)=>[index('buildings_embedding_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),]
+);
 export const images = pgTable('images', { 
 	id: uuid('id').primaryKey().defaultRandom(),
 	buildingId: uuid('building_id').notNull().references(() => buildings.id, { onDelete: 'cascade' }),
