@@ -1,7 +1,11 @@
 // packages/ai/src/embed.ts
-import { AutoProcessor, SiglipVisionModel, RawImage } from '@huggingface/transformers';
+import { AutoProcessor, SiglipVisionModel, RawImage, env } from '@huggingface/transformers';
 
 const MODEL_ID = 'Xenova/siglip-base-patch16-224';
+
+if (process.env.HF_CACHE_DIR) {
+	env.cacheDir = process.env.HF_CACHE_DIR;
+}
 
 // Lazy, load-once singletons (the model + processor are heavy)
 let processorPromise: ReturnType<typeof AutoProcessor.from_pretrained> | undefined;

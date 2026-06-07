@@ -2,13 +2,13 @@
 
 A traditional-architecture exploration platform. Browse and search a curated catalog of fine traditional architecture, or upload a photo of any building to get an AI-generated analysis and matches against the catalog.
 
-**Status:** Phase 1 (catalog gallery) and Phase 2a (AI vision metadata) complete and live on a Lightsail VPS. Phase 2b (image embeddings + similarity) is next.
+**Status:** Phase 1 (catalog gallery), Phase 2a (AI vision metadata), and Phase 2b (image embeddings + "related buildings" similarity) complete and live on a Lightsail VPS.
 
 ---
 
-## Current architecture (Phase 1 + 2a)
+## Current architecture (Phase 1 + 2a + 2b)
 
-A pnpm monorepo. `apps/web` is the only running app today; the `packages/*` are consumed as workspace dependencies and **transpiled directly by Next.js** (no separate build step). The AI ingest runs as a one-off script in `packages/db` (the long-term Redis worker is still future work).
+A pnpm monorepo. `apps/web` is the only running app today; the `packages/*` are consumed as workspace dependencies and **transpiled directly by Next.js** (no separate build step). The AI ingest and image-embedding steps run as one-off scripts in `packages/db` (the long-term Redis worker is still future work).
 
 ```
 portfolioProject/
@@ -18,14 +18,15 @@ portfolioProject/
 ├── packages/
 │   ├── db/         Drizzle ORM + postgres.js — schema, migrations, seed + ingest scripts
 │   ├── storage/    AWS S3 wrapper — listCatalogObjects, getPresignedImageUrl
-│   ├── ai/         OpenRouter vision client — describeBuilding (Claude Sonnet, Zod-validated JSON)
+│   ├── ai/         OpenRouter vision — describeBuilding (Claude Sonnet) + local SigLIP embeddings — embedImage
 │   └── shared/     shared types/utils (minimal so far)
 └── infra/         docker (dev + prod compose), nginx server block, env templates
 ```
 
 ### Data model
 
-- **`buildings`** — `id`, `title`, `slug` (the URL key), `source_url`, `license`, `edited_by_human`, plus AI-populated metadata: `era`, `primary_style`, `year_built_estimate`, `description`, `ai_model`, `ai_processed_at`. Phase 2a fills `era`/`primary_style`/`year_built_estimate`/`description`; `ai_processed_at` is null until a row is processed (the ingest idempotency key), and `edited_by_human` marks rows a human has corrected (so re-ingest skips them).
+- **`buildings`** — `id`, `title`, `slug` (the URL key), `source_url`, `license`, `edited_by_human`, plus AI-populated metadata: `era`, `primary_style`, `year_built_estimate`, `description`, `ai_model`, `ai_processed_at`, and a Phase 2b `embedding` column. Phase 2a fills `era`/`primary_style`/`year_built_estimate`/`description`; `ai_processed_at` is null until a row is processed (the ingest idempotency key), and `edited_by_human` marks rows a human has corrected (so re-ingest skips them).
+- **`buildings.embedding`** — a `vector(768)` (pgvector) holding the L2-normalized SigLIP image embedding, with an **HNSW index** (`vector_cosine_ops`) for fast nearest-neighbor search. `null` until the embed step runs (the embed idempotency key). Powers the "Related buildings" grid on the detail page via cosine distance (`<=>`).
 - **`images`** — `id`, `building_id` (FK → `buildings`), `s3_key`, `width`, `height`.
 
 Images live in a **private S3 bucket**; the app mints short-lived **presigned URLs** on demand rather than exposing objects publicly.
@@ -48,7 +49,7 @@ flowchart LR
 4. `next/image`'s optimizer fetches that URL server-side, converts to WebP, and serves it.
 5. AWS credentials and the DB connection never reach the browser.
 
-The gallery (`apps/web/app/page.tsx`) and detail page (`apps/web/app/buildings/[slug]/page.tsx`) are both `force-dynamic` so they query live on each request. The detail page sets a per-building `<title>` via `generateMetadata` and renders the AI `description`.
+The gallery (`apps/web/app/page.tsx`) and detail page (`apps/web/app/buildings/[slug]/page.tsx`) are both `force-dynamic` so they query live on each request. The detail page sets a per-building `<title>` via `generateMetadata`, renders the AI `description`, and (Phase 2b) shows a **"Related buildings"** grid by ordering the catalog by cosine distance (`embedding <=> $current`) against the current building's embedding.
 
 ### AI ingest pipeline (Phase 2a)
 
@@ -70,6 +71,26 @@ flowchart LR
 
 Model is configured via `OPENROUTER_VISION_MODEL` (`anthropic/claude-sonnet-4.6`) with the key in `OPENROUTER_API_KEY`.
 
+### Image embedding pipeline (Phase 2b)
+
+Embeddings are computed **locally on CPU** (no external API) by a one-off, idempotent script, mirroring the ingest shape.
+
+```mermaid
+flowchart LR
+    E[embed script<br/>packages/db] -->|rows WHERE embedding IS NULL| P[(Postgres<br/>+ pgvector)]
+    E -->|presign s3_key| S3[(private S3 bucket)]
+    E -->|embedImage\(presignedUrl\)| AI[packages/ai<br/>SigLIP · transformers.js]
+    AI -->|L2-normalized 768-d vector| E
+    E -->|UPDATE buildings.embedding| P
+```
+
+1. `packages/db/scripts/embed.ts` selects buildings ⋈ images where `embedding IS NULL` (the idempotency key), so re-runs only pick up new/failed rows.
+2. For each row it presigns the image and calls `embedImage(url)` in `packages/ai`.
+3. `embedImage` runs **SigLIP** (`Xenova/siglip-base-patch16-224`) via `@huggingface/transformers` (ONNX Runtime, CPU). It reads the image, takes the model's `pooler_output` (`[1, 768]`), and **L2-normalizes** it so cosine distance is meaningful.
+4. The vector is written to `buildings.embedding`, where the HNSW index makes the detail page's nearest-neighbor query fast.
+
+The model files (~350MB) are downloaded on first run and cached. **transformers.js does not honor `HF_HOME`** (that's the Python library); the cache dir is set explicitly via `env.cacheDir` from the `HF_CACHE_DIR` env var, which in prod points at a Docker named volume (`hf_cache`) so the model isn't re-downloaded on every run. On the memory-constrained box the model can be loaded quantized (`{ dtype: 'q8' }`) to cut RAM and download size.
+
 ### Deployment topology
 
 All on AWS: a single Lightsail instance running Docker Compose, reading from an S3 bucket in the same account.
@@ -86,6 +107,7 @@ flowchart TB
             R[(redis · reserved for worker)]
             Mig[migrator · on-demand]-. migrate + seed .-> PG
             Ing[ingest · on-demand]-. AI metadata .-> PG
+            Emb[embed · on-demand]-. SigLIP vectors .-> PG
         end
         NGINX -->|127.0.0.1:3300| Web
         Web --> PG
@@ -96,7 +118,7 @@ flowchart TB
     IAM --> S3[(S3 bucket · same AWS account)]
 ```
 
-- The Compose stack is `web` + `postgres` + `redis`, plus on-demand `tools`-profile services: `migrator` (migrate + seed) and `ingest` (AI vision metadata). The `web` container is published on `127.0.0.1:3300` only.
+- The Compose stack is `web` + `postgres` + `redis`, plus on-demand `tools`-profile services: `migrator` (migrate + seed), `ingest` (AI vision metadata), and `embed` (local SigLIP image embeddings, with the model cached in the `hf_cache` named volume). The `web` container is published on `127.0.0.1:3300` only.
 - **`redis` is provisioned but not yet used** — it's reserved for the future ingest worker. Nothing connects to it today.
 - The box has **4GB swap** added (Lightsail's 2GB plan ships with none); without it, `next build` and concurrent containers OOM-killed the Next server. Swap is the safety valve on this memory-constrained host.
 - **TLS/ingress is the host's existing nginx** (shared with other sites on the box); a server block reverse-proxies the subdomain to the web container, with the cert issued via certbot (see `infra/nginx/architectraits.conf`).
@@ -123,6 +145,7 @@ pnpm --filter architectraits-db generate   # create a migration from schema chan
 pnpm --filter architectraits-db migrate     # apply migrations
 pnpm --filter architectraits-db seed         # (re)build the catalog from S3 keys
 pnpm --filter architectraits-db ingest       # AI vision metadata (idempotent; only null/unedited rows)
+pnpm --filter architectraits-db embed         # local SigLIP image embeddings (idempotent; only rows where embedding IS NULL)
 pnpm --filter architectraits-db studio       # browse/edit the DB in Drizzle Studio
 ```
 
@@ -145,9 +168,13 @@ docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.
 
 # one-off AI ingest — run AFTER migrator, once OPENROUTER_API_KEY is set
 docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --build --rm ingest
+
+# one-off image embeddings — run AFTER migrator; CPU-only, no API key needed.
+# First run downloads the SigLIP model into the hf_cache volume (~350MB); re-runs reuse it.
+docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --build --rm embed
 ```
 
-> The `tools` services build from current source; pass `--build` so a code change (e.g. a new migration) isn't missed by a stale image. `seed` wipes + rebuilds `buildings`, so prod gets fresh AI output — local hand-corrections don't transfer through a re-seed.
+> The `tools` services build from current source; pass `--build` so a code change (e.g. a new migration) isn't missed by a stale image. `seed` wipes + rebuilds `buildings`, so prod gets fresh AI output — local hand-corrections don't transfer through a re-seed. A re-seed nulls `embedding` too, so re-run `embed` (and `ingest`) after any re-seed.
 
 Then wire it into the host's nginx and get a cert:
 
@@ -168,13 +195,12 @@ Then visit `https://architectraits.andrewtimothydev.com`.
 
 The longer-term plan the project is building toward:
 
-- **Phase 2b — embeddings + similarity:** image embeddings (CLIP/SigLIP, likely transformers.js run locally), stored in a `pgvector` column, powering "related buildings" on detail pages.
-- **`apps/worker`** — long-running ingest worker (Redis-backed) that processes new S3 objects, replacing the one-off ingest script.
+- **`apps/worker`** — long-running ingest worker (Redis-backed) that processes new S3 objects, replacing the one-off ingest/embed scripts.
 - **`apps/admin`** — internal admin for editing AI-tagged entries.
 - **`packages/imgcore-node` / `imgcore-wasm`** — a C++ image-processing core (perceptual hashing, dominant color, gradient feature vectors) built as both a Node N-API addon and a WebAssembly module from one CMake source tree.
 - **Visitor upload-and-analyze:** upload a building photo → AI analysis → nearest matches in the catalog.
 
-Done so far: **Phase 2a** — vision metadata (style, era, year, description) via Claude Sonnet on OpenRouter.
+Done so far: **Phase 2a** — vision metadata (style, era, year, description) via Claude Sonnet on OpenRouter; **Phase 2b** — local SigLIP image embeddings in pgvector, powering "related buildings" on detail pages.
 
 ## License
 

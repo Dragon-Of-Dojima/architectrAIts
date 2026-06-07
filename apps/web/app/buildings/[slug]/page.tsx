@@ -1,4 +1,4 @@
-import { eq, and, ne, isNotNull, cosineDistance, sql } from 'drizzle-orm';
+import { eq, and, ne, isNotNull, sql } from 'drizzle-orm';
 import { db, buildings, images } from 'architectraits-db';
 import { getPresignedImageUrl } from 'architectraits-storage';
 import { notFound } from 'next/navigation';
@@ -39,7 +39,7 @@ export default async function BuildingPage({
 	const page = await getPresignedImageUrl(building.s3Key)
 	let related: { slug: string; title: string; url: string }[] = [];
 	if (building.embedding) {
-		const distance = sql<number>`${cosineDistance(buildings.embedding, building.embedding)}`;
+		const distance = sql<number>`${buildings.embedding} <=> ${JSON.stringify(building.embedding)}::vector`;
 		const neighbors = await db
 			.select({ slug: buildings.slug, title: buildings.title, s3Key: images.s3Key })
 			.from(buildings)
