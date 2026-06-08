@@ -21,6 +21,7 @@ export default async function Home() {
   // 3. Return the grid.
   return (
     <main id="wrapper" className="max-w-7xl mx-auto">
+	<Link href="/analyze" className="underline">Analyze your own photo →</Link>
 	 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	   {cards.map(card => (
 		    <Link key={card.id} href={`/buildings/${card.slug}`}>

@@ -71,6 +71,9 @@ services:
     environment:
       # Internal compose network hostname; overrides anything in .env.prod.
       DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+      # Where the web BFF route (/api/analyze) forwards uploads for inference.
+      # Reachable over the compose network by service name; not published.
+      ANALYZE_API_URL: http://api:3301
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +81,36 @@ services:
     # Not exposed publicly (the Lightsail firewall doesn't open 3300 anyway).
     ports:
       - '127.0.0.1:3300:3300'
+
+  # Long-running inference service for the visitor upload-and-analyze feature.
+  # The web BFF (apps/web/app/api/analyze/route.ts) POSTs raw image bytes here;
+  # this service runs describeBuilding (OpenRouter) + embedImageFromBlob (local
+  # SigLIP) and returns { analysis, embedding }. Stateless: no DB, no S3.
+  #
+  # Uses the build image (source + tsx + the architectraits-ai dep with
+  # onnxruntime-node) and runs via tsx, mirroring the tools services — this
+  # sidesteps bundling onnxruntime's native binaries into a compiled artifact.
+  # Internal only: no published ports; web reaches it at http://api:3301.
+  #
+  # Memory note: this holds the ~350MB SigLIP model resident once the first
+  # upload loads it. On the 2GB box that competes with web/postgres — the 4GB
+  # swap is the safety valve. The model is cached in the shared hf_cache volume
+  # (populated by the embed tool), so it isn't re-downloaded here.
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: build
+    container_name: architectraits-api
+    restart: unless-stopped
+    # Supplies OPENROUTER_API_KEY + OPENROUTER_VISION_MODEL (shared with ingest).
+    env_file: .env.prod
+    environment:
+      PORT: '3301'
+      HF_CACHE_DIR: /app/.hf-cache
+    volumes:
+      - hf_cache:/app/.hf-cache
+    command: ['sh', '-c', 'pnpm --filter api exec tsx src/index.ts']
 
   # Run on demand only (profile: tools). Uses the build image, which has the
   # source + dev deps (drizzle-kit, tsx) needed for migrations + seeding.
