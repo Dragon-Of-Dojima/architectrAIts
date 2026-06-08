@@ -14,6 +14,9 @@ importers:
 
   apps/api:
     dependencies:
+      architectraits-ai:
+        specifier: workspace:*
+        version: link:../../packages/ai
       architectraits-shared:
         specifier: workspace:*
         version: link:../../packages/shared
@@ -36,6 +39,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.19
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       tsx:
         specifier: ^4.19.0
         version: 4.22.3
