@@ -16,6 +16,12 @@ export async function POST(request: Request){
 		body: bytes,
 	});
 	if (!apiRes.ok) {
+		// Surface an oversized upload as a real 413 (the inference service's
+		// express.raw limit) instead of an opaque 502, so the client can show a
+		// size-specific message.
+		if (apiRes.status === 413) {
+			return NextResponse.json({ error: 'Image too large' }, { status: 413 });
+		}
 		return NextResponse.json({ error: 'Analysis failed' }, { status: 502 });
 	}
 	const { analysis, embedding } = await apiRes.json();

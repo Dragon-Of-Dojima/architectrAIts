@@ -2,23 +2,23 @@
 
 A traditional-architecture exploration platform. Browse and search a curated catalog of fine traditional architecture, or upload a photo of any building to get an AI-generated analysis and matches against the catalog.
 
-**Status:** Phase 1 (catalog gallery), Phase 2a (AI vision metadata), and Phase 2b (image embeddings + "related buildings" similarity) complete and live on a Lightsail VPS.
+**Status:** Phase 1 (catalog gallery), Phase 2a (AI vision metadata), Phase 2b (image embeddings + "related buildings" similarity), and Phase 2c (visitor upload-and-analyze) complete and live on a Lightsail VPS.
 
 ---
 
-## Current architecture (Phase 1 + 2a + 2b)
+## Current architecture (Phase 1 + 2a + 2b + 2c)
 
-A pnpm monorepo. `apps/web` is the only running app today; the `packages/*` are consumed as workspace dependencies and **transpiled directly by Next.js** (no separate build step). The AI ingest and image-embedding steps run as one-off scripts in `packages/db` (the long-term Redis worker is still future work).
+A pnpm monorepo. Two apps run today: `apps/web` (the Next.js UI + BFF) and `apps/api` (an Express inference service for the upload-and-analyze feature). The `packages/*` are consumed as workspace dependencies and **transpiled directly by Next.js** (no separate build step). The AI ingest and image-embedding steps run as one-off scripts in `packages/db` (the long-term Redis worker is still future work).
 
 ```
 portfolioProject/
 ├── apps/
-│   ├── web/        Next.js 16 App Router (React Server Components) — gallery + detail UI  :3300
-│   └── api/        Express — scaffolded, not used yet                                     :3301
+│   ├── web/        Next.js 16 App Router (React Server Components) — gallery + detail + analyze UI, /api/analyze BFF  :3300
+│   └── api/        Express — POST /analyze inference service (vision + embedding) for upload-and-analyze            :3301
 ├── packages/
 │   ├── db/         Drizzle ORM + postgres.js — schema, migrations, seed + ingest scripts
 │   ├── storage/    AWS S3 wrapper — listCatalogObjects, getPresignedImageUrl
-│   ├── ai/         OpenRouter vision — describeBuilding (Claude Sonnet) + local SigLIP embeddings — embedImage
+│   ├── ai/         OpenRouter vision — describeBuilding (Claude Sonnet) + local SigLIP embeddings — embedImage / embedImageFromBlob
 │   └── shared/     shared types/utils (minimal so far)
 └── infra/         docker (dev + prod compose), nginx server block, env templates
 ```
@@ -91,6 +91,30 @@ flowchart LR
 
 The model files (~350MB) are downloaded on first run and cached. **transformers.js does not honor `HF_HOME`** (that's the Python library); the cache dir is set explicitly via `env.cacheDir` from the `HF_CACHE_DIR` env var, which in prod points at a Docker named volume (`hf_cache`) so the model isn't re-downloaded on every run. On the memory-constrained box the model can be loaded quantized (`{ dtype: 'q8' }`) to cut RAM and download size.
 
+### Visitor upload-and-analyze (Phase 2c)
+
+A visitor uploads a photo of any building; the app returns an AI analysis plus the nearest matches in the catalog. Unlike the gallery/detail pages (pure Server Components), this is a request-time inference path, so it's split across a **web BFF route** and a separate **`apps/api` inference service**.
+
+```mermaid
+flowchart LR
+    U[Browser<br/>analyze page] -->|POST image bytes| BFF[web BFF<br/>/api/analyze]
+    BFF -->|POST raw image| API[apps/api<br/>Express :3301]
+    API -->|describeBuilding\(dataURL\)| OR([OpenRouter · Claude Sonnet])
+    API -->|embedImageFromBlob\(blob\)| SIG[SigLIP · transformers.js]
+    API -->|analysis + embedding| BFF
+    BFF -->|cosine nearest-neighbor| P[(Postgres<br/>+ pgvector)]
+    BFF -->|presign neighbor s3_keys| S3[(private S3 bucket)]
+    BFF -->|analysis + matches| U
+```
+
+1. The client (`apps/web/app/analyze/page.tsx`) sends the raw file to the web BFF at `apps/web/app/api/analyze/route.ts` with the file's `content-type`. The BFF rejects anything that isn't `image/*` with a `400`.
+2. The BFF forwards the raw bytes to the inference service at `${ANALYZE_API_URL}/analyze`. If that call fails it returns a `502`.
+3. `apps/api` (`POST /analyze`) reads the body via `express.raw({ type: 'image/*', limit: '8mb' })`, validates it's a non-empty image, then runs `describeBuilding` (OpenRouter vision) and `embedImageFromBlob` (local SigLIP) **in parallel** and replies `{ analysis, embedding }`. It's **stateless** — no DB, no S3 — so it can scale independently of the web app.
+4. The BFF takes the returned `embedding`, runs a pgvector nearest-neighbor query (`embedding <=> $vec`, ordered ascending, `LIMIT 6`, skipping rows where `embedding IS NULL`), presigns each neighbor's `s3_key`, and returns `{ analysis, matches }`.
+5. `AnalysisResults.tsx` renders the analysis (style, era, year, description) and the closest-match grid, each linking to its catalog detail page.
+
+`embedImageFromBlob(blob)` shares the same pooling + L2-normalize path as `embedImage(url)` (both call the internal `embedRawImage`), so an uploaded photo and a catalog image land in the **same embedding space** — that's what makes "upload a known catalog photo → its own row is the top match" hold. The vision and embedding env requirements match the ingest/embed pipelines: `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL` for `describeBuilding`, and `HF_CACHE_DIR` for the SigLIP cache.
+
 ### Deployment topology
 
 All on AWS: a single Lightsail instance running Docker Compose, reading from an S3 bucket in the same account.
@@ -103,6 +127,7 @@ flowchart TB
         NGINX[host nginx<br/>TLS · reverse proxy]
         subgraph DC[Docker Compose]
             Web[web · standalone Next]
+            API[api · Express inference]
             PG[(postgres + pgvector)]
             R[(redis · reserved for worker)]
             Mig[migrator · on-demand]-. migrate + seed .-> PG
@@ -111,14 +136,17 @@ flowchart TB
         end
         NGINX -->|127.0.0.1:3300| Web
         Web --> PG
+        Web -->|http://api:3301| API
     end
 
     Ing --> ORouter([OpenRouter · Claude Sonnet])
+    API --> ORouter
     Web --> IAM([IAM user · read-only S3])
     IAM --> S3[(S3 bucket · same AWS account)]
 ```
 
-- The Compose stack is `web` + `postgres` + `redis`, plus on-demand `tools`-profile services: `migrator` (migrate + seed), `ingest` (AI vision metadata), and `embed` (local SigLIP image embeddings, with the model cached in the `hf_cache` named volume). The `web` container is published on `127.0.0.1:3300` only.
+- The Compose stack is `web` + `api` + `postgres` + `redis`, plus on-demand `tools`-profile services: `migrator` (migrate + seed), `ingest` (AI vision metadata), and `embed` (local SigLIP image embeddings, with the model cached in the `hf_cache` named volume). The `web` container is published on `127.0.0.1:3300` only.
+- **`api` is the upload-and-analyze inference service** — internal only (no published ports; `web` reaches it at `http://api:3301` over the compose network). It runs via `tsx` from the build image (so `onnxruntime-node`'s native binary isn't bundled into a compiled artifact) and shares the `hf_cache` volume, so the SigLIP model it loads on the first upload is the same one the `embed` tool populated. It holds the ~350MB model resident once loaded, which competes with `web`/`postgres` on the 2GB box — the 4GB swap is the safety valve.
 - **`redis` is provisioned but not yet used** — it's reserved for the future ingest worker. Nothing connects to it today.
 - The box has **4GB swap** added (Lightsail's 2GB plan ships with none); without it, `next build` and concurrent containers OOM-killed the Next server. Swap is the safety valve on this memory-constrained host.
 - **TLS/ingress is the host's existing nginx** (shared with other sites on the box); a server block reverse-proxies the subdomain to the web container, with the cert issued via certbot (see `infra/nginx/architectraits.conf`).
@@ -135,7 +163,14 @@ Prerequisites: Node 22+, pnpm 10+, Docker.
 pnpm install
 pnpm db:up          # Postgres (pgvector) + Redis in Docker
 # create apps/web/.env.local with DATABASE_URL, S3_BUCKET, AWS_REGION
+# (for upload-and-analyze, also set ANALYZE_API_URL=http://localhost:3301)
 pnpm --filter web dev   # http://localhost:3300
+```
+
+For the visitor upload-and-analyze feature (`/analyze`), also run the inference service. It needs `apps/api/.env` with `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL` (same as ingest), and optionally `HF_CACHE_DIR` to reuse the cached SigLIP model:
+
+```bash
+pnpm --filter api dev   # Express on http://localhost:3301
 ```
 
 Database + ingest tasks (in `packages/db`; needs `packages/db/.env` with `DATABASE_URL`, `S3_BUCKET`, `AWS_REGION`, and for ingest `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL`):
@@ -157,10 +192,10 @@ AWS credentials for local dev are read from `~/.aws` via the default credential 
 
 ## Deployment (Lightsail)
 
-On the instance, with `infra/docker/.env.prod` filled in (`POSTGRES_PASSWORD`, IAM keys, and `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL` for ingest):
+On the instance, with `infra/docker/.env.prod` filled in (`POSTGRES_PASSWORD`, IAM keys, and `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL`, shared by the `ingest` tool and the `api` service):
 
 ```bash
-# build + start the stack (web published on 127.0.0.1:3300)
+# build + start the stack: web (127.0.0.1:3300) + api (internal :3301) + postgres + redis
 docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod up -d --build
 
 # one-off migrate + seed (rebuilds the buildings table from S3)
@@ -198,9 +233,8 @@ The longer-term plan the project is building toward:
 - **`apps/worker`** — long-running ingest worker (Redis-backed) that processes new S3 objects, replacing the one-off ingest/embed scripts.
 - **`apps/admin`** — internal admin for editing AI-tagged entries.
 - **`packages/imgcore-node` / `imgcore-wasm`** — a C++ image-processing core (perceptual hashing, dominant color, gradient feature vectors) built as both a Node N-API addon and a WebAssembly module from one CMake source tree.
-- **Visitor upload-and-analyze:** upload a building photo → AI analysis → nearest matches in the catalog.
 
-Done so far: **Phase 2a** — vision metadata (style, era, year, description) via Claude Sonnet on OpenRouter; **Phase 2b** — local SigLIP image embeddings in pgvector, powering "related buildings" on detail pages.
+Done so far: **Phase 2a** — vision metadata (style, era, year, description) via Claude Sonnet on OpenRouter; **Phase 2b** — local SigLIP image embeddings in pgvector, powering "related buildings" on detail pages; **Phase 2c** — visitor upload-and-analyze (upload a building photo → AI analysis → nearest catalog matches), via the `apps/api` inference service behind the web BFF.
 
 ## License
 
