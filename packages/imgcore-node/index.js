@@ -1,0 +1,1 @@
+const imgcorenode = require('./build/Release/imgcore_node.node');
