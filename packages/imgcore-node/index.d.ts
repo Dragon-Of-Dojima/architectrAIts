@@ -1,1 +1,1 @@
-export function dhashHexwrapper(data: Buffer | Uint8Array, width: number, height: number, channels?: number): string;
+export function dhashHex(data: Buffer | Uint8Array, width: number, height: number, channels?: number): string;

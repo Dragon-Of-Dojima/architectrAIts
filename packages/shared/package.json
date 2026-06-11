@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./imgcore":"./src/imgcore.ts",
+    "./hamming": "./src/hamming.ts"
   },
   "scripts": {
     "lint": "echo \"(no lint config yet)\" && exit 0",
@@ -12,7 +14,9 @@
     "test": "echo \"(no tests yet)\" && exit 0"
   },
   "dependencies": {
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "sharp": "^0.34.0",
+    "architectraits-imgcore-node":"workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0"

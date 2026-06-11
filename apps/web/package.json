@@ -13,6 +13,7 @@
   "dependencies": {
     "architectraits-db": "workspace:*",
     "architectraits-storage": "workspace:*",
+    "architectraits-shared": "workspace:*",
     "drizzle-orm": "^0.39.0",
     "next": "16.2.6",
     "react": "19.2.4",

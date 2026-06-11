@@ -18,3 +18,8 @@ export async function getPresignedImageUrl(key: string, expiresIn = 3600): Promi
 	const command = new GetObjectCommand({ Bucket: bucket, Key: key });
 	return getSignedUrl(s3, command, { expiresIn });
 }
+export async function downloadCatalogObject(key: string): Promise<Buffer>{
+	const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+	const bytes = await res.Body!.transformToByteArray();   // SDK v3 helper
+	return Buffer.from(bytes);
+}

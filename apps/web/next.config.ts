@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
 	// In a monorepo, point file tracing at the repo root so workspace packages
 	// (architectraits-db / -storage) are included in the standalone output.
 	outputFileTracingRoot: path.join(import.meta.dirname, '../../'),
-	transpilePackages: ['architectraits-db', 'architectraits-storage'],
+	transpilePackages: ['architectraits-db', 'architectraits-storage','architectraits-shared'],
 	images: {
 		remotePatterns: [
 			{

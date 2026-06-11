@@ -54,6 +54,9 @@ importers:
       architectraits-db:
         specifier: workspace:*
         version: link:../../packages/db
+      architectraits-shared:
+        specifier: workspace:*
+        version: link:../../packages/shared
       architectraits-storage:
         specifier: workspace:*
         version: link:../../packages/storage
@@ -119,6 +122,9 @@ importers:
       architectraits-ai:
         specifier: workspace:*
         version: link:../ai
+      architectraits-shared:
+        specifier: workspace:*
+        version: link:../shared
       architectraits-storage:
         specifier: workspace:*
         version: link:../storage
@@ -155,8 +161,16 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0
 
+  packages/imgcore-wasm: {}
+
   packages/shared:
     dependencies:
+      architectraits-imgcore-node:
+        specifier: workspace:*
+        version: link:../imgcore-node
+      sharp:
+        specifier: ^0.34.0
+        version: 0.34.5
       zod:
         specifier: ^3.23.0
         version: 3.25.76

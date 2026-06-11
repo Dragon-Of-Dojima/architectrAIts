@@ -4,6 +4,7 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import type { HealthResponse } from 'architectraits-shared';
 import cors from 'cors';
+import { dhashImage } from 'architectraits-shared/imgcore';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3301; //cast as number bc process.env.PORT is always a string when set
@@ -36,11 +37,12 @@ app.post("/analyze",express.raw({ type: 'image/*', limit: '8mb' }),async functio
 	try{
 		const dataURL = `data:${contentType};base64,${buff.toString('base64')}`;
 		const blob = new Blob([buff],{type:contentType});
-		const [analysis, embedding] = await Promise.all([
+		const [analysis, embedding, dhash] = await Promise.all([
 			describeBuilding(dataURL),
-			embedImageFromBlob(blob)
+			embedImageFromBlob(blob),
+			dhashImage(buff)
 		]);
-		res.json({analysis,embedding});
+		res.json({analysis,embedding,dhash});
 	}catch(e){
 		console.log('[analyze] failed:',e);
 		res.status(502).json({error:'Analysis failed'});

@@ -23,5 +23,6 @@ export const images = pgTable('images', {
 	s3Key: text('s3_key').notNull(),
 	width: integer('width'),
 	height: integer('height'),
+	dhash: text('dhash'),
 	ingestedAt: timestamp('ingested_at',{withTimezone:true}).notNull().defaultNow()
 });
