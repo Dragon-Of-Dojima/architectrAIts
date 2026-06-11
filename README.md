@@ -2,30 +2,31 @@
 
 A traditional-architecture exploration platform. Browse and search a curated catalog of fine traditional architecture, or upload a photo of any building to get an AI-generated analysis and matches against the catalog.
 
-**Status:** Phase 1 (catalog gallery), Phase 2a (AI vision metadata), Phase 2b (image embeddings + "related buildings" similarity), and Phase 2c (visitor upload-and-analyze) complete and live on a Lightsail VPS.
+**Status:** Live in production on a Lightsail VPS. The browsable catalog, AI vision metadata, image-embedding similarity ("related buildings"), visitor upload-and-analyze, and the auto-enriching ingest worker are all built and running.
 
 ---
 
-## Current architecture (Phase 1 + 2a + 2b + 2c)
+## Architecture
 
 A pnpm monorepo. Three apps run today: `apps/web` (the Next.js UI + BFF), `apps/api` (an Express inference service for the upload-and-analyze feature), and `apps/worker` (a long-running poller that keeps the catalog enriched). The `packages/*` are consumed as workspace dependencies and **transpiled directly by Next.js** (no separate build step). The AI ingest, embedding, and dHash steps run continuously in `apps/worker`, and the same idempotent steps are also exposed as one-off scripts in `packages/db` for bulk backfill.
 
 ```
 portfolioProject/
 ├── apps/
-│   ├── web/        Next.js 16 App Router (React Server Components) — gallery + detail + analyze UI, /api/analyze BFF  :3300
-│   └── api/        Express — POST /analyze inference service (vision + embedding) for upload-and-analyze            :3301
+│   ├── web/        Next.js 16 App Router (RSC) — landing, catalog (paginated), building detail, analyze UI, /api/analyze BFF  :3300
+│   ├── api/        Express — POST /analyze inference service (vision + embedding) for upload-and-analyze            :3301
+│   └── worker/     polling ingest worker — discovers + enriches new S3 objects (database-as-queue)
 ├── packages/
 │   ├── db/         Drizzle ORM + postgres.js — schema, migrations, seed + ingest scripts
 │   ├── storage/    AWS S3 wrapper — listCatalogObjects, getPresignedImageUrl
 │   ├── ai/         OpenRouter vision — describeBuilding (Claude Sonnet) + local SigLIP embeddings — embedImage / embedImageFromBlob
-│   └── shared/     shared types/utils (minimal so far)
+│   └── shared/     shared types/utils + perceptual-hash helpers
 └── infra/         docker (dev + prod compose), nginx server block, env templates
 ```
 
 ### Data model
 
-- **`buildings`** — `id`, `title`, `slug` (the URL key), `source_url`, `license`, `edited_by_human`, plus AI-populated metadata: `era`, `primary_style`, `year_built_estimate`, `description`, `ai_model`, `ai_processed_at`, and a Phase 2b `embedding` column. Phase 2a fills `era`/`primary_style`/`year_built_estimate`/`description`; `ai_processed_at` is null until a row is processed (the ingest idempotency key), and `edited_by_human` marks rows a human has corrected (so re-ingest skips them).
+- **`buildings`** — `id`, `title`, `slug` (the URL key), `source_url`, `license`, `edited_by_human`, plus AI-populated metadata: `era`, `primary_style`, `year_built_estimate`, `description`, `ai_model`, `ai_processed_at`, and the `embedding` column. The vision step fills `era`/`primary_style`/`year_built_estimate`/`description`; `ai_processed_at` is null until a row is processed (the ingest idempotency key), and `edited_by_human` marks rows a human has corrected (so re-ingest skips them).
 - **`buildings.embedding`** — a `vector(768)` (pgvector) holding the L2-normalized SigLIP image embedding, with an **HNSW index** (`vector_cosine_ops`) for fast nearest-neighbor search. `null` until the embed step runs (the embed idempotency key). Powers the "Related buildings" grid on the detail page via cosine distance (`<=>`).
 - **`images`** — `id`, `building_id` (FK → `buildings`), `s3_key`, `width`, `height`.
 
@@ -49,9 +50,9 @@ flowchart LR
 4. `next/image`'s optimizer fetches that URL server-side, converts to WebP, and serves it.
 5. AWS credentials and the DB connection never reach the browser.
 
-The gallery (`apps/web/app/page.tsx`) and detail page (`apps/web/app/buildings/[slug]/page.tsx`) are both `force-dynamic` so they query live on each request. The detail page sets a per-building `<title>` via `generateMetadata`, renders the AI `description`, and (Phase 2b) shows a **"Related buildings"** grid by ordering the catalog by cosine distance (`embedding <=> $current`) against the current building's embedding.
+The catalog (`apps/web/app/catalog/page.tsx`) and detail page (`apps/web/app/buildings/[slug]/page.tsx`) are both `force-dynamic` so they query live on each request; the catalog is **paginated** (8 per page, newest first, driven by a `?page=` query param, so only the current page's `s3_key`s are presigned/loaded). The landing page (`apps/web/app/page.tsx`) is a static hero (a CC0 Bellotto painting) that links into the catalog and analyze flows. The detail page sets a per-building `<title>` via `generateMetadata`, renders the AI `description`, and shows a **"Related buildings"** grid by ordering the catalog by cosine distance (`embedding <=> $current`) against the current building's embedding.
 
-### AI ingest pipeline (Phase 2a)
+### AI ingest pipeline
 
 Vision metadata is generated by idempotent steps (in `packages/db/src/jobs.ts`) shared by the long-running `apps/worker` poller and the one-off `packages/db` backfill scripts.
 
@@ -59,7 +60,7 @@ Vision metadata is generated by idempotent steps (in `packages/db/src/jobs.ts`) 
 flowchart LR
     I[ingest script<br/>packages/db] -->|rows WHERE ai_processed_at IS NULL<br/>AND NOT edited_by_human| P[(Postgres)]
     I -->|presign s3_key| S3[(private S3 bucket)]
-    I -->|describeBuilding\(presignedUrl\)| AI[packages/ai<br/>OpenRouter · Claude Sonnet]
+    I -->|"describeBuilding(presignedUrl)"| AI[packages/ai<br/>OpenRouter · Claude Sonnet]
     AI -->|Zod-validated JSON| I
     I -->|UPDATE row + stamp ai_model/ai_processed_at| P
 ```
@@ -71,7 +72,7 @@ flowchart LR
 
 Model is configured via `OPENROUTER_VISION_MODEL` (`anthropic/claude-sonnet-4.6`) with the key in `OPENROUTER_API_KEY`.
 
-### Image embedding pipeline (Phase 2b)
+### Image embedding pipeline
 
 Embeddings are computed **locally on CPU** (no external API) by a one-off, idempotent script, mirroring the ingest shape.
 
@@ -79,7 +80,7 @@ Embeddings are computed **locally on CPU** (no external API) by a one-off, idemp
 flowchart LR
     E[embed script<br/>packages/db] -->|rows WHERE embedding IS NULL| P[(Postgres<br/>+ pgvector)]
     E -->|presign s3_key| S3[(private S3 bucket)]
-    E -->|embedImage\(presignedUrl\)| AI[packages/ai<br/>SigLIP · transformers.js]
+    E -->|"embedImage(presignedUrl)"| AI[packages/ai<br/>SigLIP · transformers.js]
     AI -->|L2-normalized 768-d vector| E
     E -->|UPDATE buildings.embedding| P
 ```
@@ -91,7 +92,7 @@ flowchart LR
 
 The model files (~350MB) are downloaded on first run and cached. **transformers.js does not honor `HF_HOME`** (that's the Python library); the cache dir is set explicitly via `env.cacheDir` from the `HF_CACHE_DIR` env var, which in prod points at a Docker named volume (`hf_cache`) so the model isn't re-downloaded on every run. On the memory-constrained box the model can be loaded quantized (`{ dtype: 'q8' }`) to cut RAM and download size.
 
-### Visitor upload-and-analyze (Phase 2c)
+### Visitor upload-and-analyze
 
 A visitor uploads a photo of any building; the app returns an AI analysis plus the nearest matches in the catalog. Unlike the gallery/detail pages (pure Server Components), this is a request-time inference path, so it's split across a **web BFF route** and a separate **`apps/api` inference service**.
 
@@ -99,8 +100,8 @@ A visitor uploads a photo of any building; the app returns an AI analysis plus t
 flowchart LR
     U[Browser<br/>analyze page] -->|POST image bytes| BFF[web BFF<br/>/api/analyze]
     BFF -->|POST raw image| API[apps/api<br/>Express :3301]
-    API -->|describeBuilding\(dataURL\)| OR([OpenRouter · Claude Sonnet])
-    API -->|embedImageFromBlob\(blob\)| SIG[SigLIP · transformers.js]
+    API -->|"describeBuilding(dataURL)"| OR([OpenRouter · Claude Sonnet])
+    API -->|"embedImageFromBlob(blob)"| SIG[SigLIP · transformers.js]
     API -->|analysis + embedding| BFF
     BFF -->|cosine nearest-neighbor| P[(Postgres<br/>+ pgvector)]
     BFF -->|presign neighbor s3_keys| S3[(private S3 bucket)]
@@ -164,32 +165,22 @@ Prerequisites: Node 22+, pnpm 10+, Docker.
 
 ```bash
 pnpm install
-pnpm db:up          # Postgres (pgvector) in Docker
-# create apps/web/.env.local with DATABASE_URL, S3_BUCKET, AWS_REGION
-# (for upload-and-analyze, also set ANALYZE_API_URL=http://localhost:3301)
-pnpm --filter web dev   # http://localhost:3300
+pnpm db:up   # Postgres (pgvector) in Docker
+pnpm dev     # web :3300 + api :3301 + worker, in parallel
 ```
 
-For the visitor upload-and-analyze feature (`/analyze`), also run the inference service. It needs `apps/api/.env` with `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL` (same as ingest), and optionally `HF_CACHE_DIR` to reuse the cached SigLIP model:
+Each app reads its own env file — `apps/web/.env.local`, `apps/api/.env`, and `apps/worker/.env` (see each app's `.env.example`). Broadly: `DATABASE_URL`, `S3_BUCKET`, `AWS_REGION` everywhere; `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL` wherever vision runs; `ANALYZE_API_URL=http://localhost:3301` for the web BFF. AWS credentials come from `~/.aws` via the default credential chain.
+
+Database + ingest tasks live in `packages/db` (needs `packages/db/.env`):
 
 ```bash
-pnpm --filter api dev   # Express on http://localhost:3301
+pnpm --filter architectraits-db migrate   # apply migrations
+pnpm --filter architectraits-db seed       # (re)build the catalog from S3 keys
+pnpm --filter architectraits-db ingest     # AI vision metadata (idempotent)
+pnpm --filter architectraits-db embed      # local SigLIP embeddings (idempotent)
 ```
 
-Database + ingest tasks (in `packages/db`; needs `packages/db/.env` with `DATABASE_URL`, `S3_BUCKET`, `AWS_REGION`, and for ingest `OPENROUTER_API_KEY` + `OPENROUTER_VISION_MODEL`):
-
-```bash
-pnpm --filter architectraits-db generate   # create a migration from schema changes
-pnpm --filter architectraits-db migrate     # apply migrations
-pnpm --filter architectraits-db seed         # (re)build the catalog from S3 keys
-pnpm --filter architectraits-db ingest       # AI vision metadata (idempotent; only null/unedited rows)
-pnpm --filter architectraits-db embed         # local SigLIP image embeddings (idempotent; only rows where embedding IS NULL)
-pnpm --filter architectraits-db studio       # browse/edit the DB in Drizzle Studio
-```
-
-AWS credentials for local dev are read from `~/.aws` via the default credential chain.
-
-> **WSL2 note:** keep the repo on the Linux-native filesystem (`~/...`), not `/mnt/c`. Next's dev compiles and `pnpm install` are dramatically slower across the Windows mount.
+> **WSL2:** keep the repo on the Linux-native filesystem (`~/...`), not `/mnt/c` — dev compiles and installs are far slower across the Windows mount.
 
 ---
 
@@ -214,28 +205,25 @@ docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.
 
 > The `tools` services build from current source; pass `--build` so a code change (e.g. a new migration) isn't missed by a stale image. `seed` wipes + rebuilds `buildings`, so prod gets fresh AI output — local hand-corrections don't transfer through a re-seed. A re-seed nulls `embedding` too, so re-run `embed` (and `ingest`) after any re-seed.
 
-Then wire it into the host's nginx and get a cert:
-
-```bash
-sudo cp infra/nginx/architectraits.conf /etc/nginx/sites-available/architectraits.andrewtimothydev.com
-sudo ln -s /etc/nginx/sites-available/architectraits.andrewtimothydev.com /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d architectraits.andrewtimothydev.com
-```
-
-Then visit `https://architectraits.andrewtimothydev.com`.
-
-> Slugs are derived from S3 filenames at seed time, so rename objects in the bucket **before** seeding a public deployment — slugs become permalinks once shared.
+TLS/ingress is handled by the host's nginx reverse-proxying the subdomain to the web container (`infra/nginx/architectraits.conf`), with the cert issued via certbot.
 
 ---
 
-## Target vision (beyond Phase 2a)
+## What's built
 
-The longer-term plan the project is building toward:
+The full platform is shipped and running:
+
+- **Catalog** — browsable, paginated gallery of the curated collection, with per-building detail pages.
+- **AI vision metadata** — style, era, year, and description via Claude Sonnet on OpenRouter.
+- **Image-embedding similarity** — local SigLIP embeddings in pgvector, powering the "related buildings" grid on detail pages.
+- **Visitor upload-and-analyze** — upload a building photo → AI analysis → nearest catalog matches, via the `apps/api` inference service behind the web BFF.
+- **Ingest worker** — `apps/worker`, a long-running poller that auto-discovers and enriches new S3 objects using the database as its work queue (no broker, no Redis).
+- **`packages/imgcore-node` / `imgcore-wasm`** — a C++ image-processing core (perceptual hashing) built as both a Node N-API addon and a WebAssembly module from one CMake source tree.
+
+## Possible future work
 
 - **`apps/admin`** — internal admin for editing AI-tagged entries.
-
-Done so far: **Phase 2a** — vision metadata (style, era, year, description) via Claude Sonnet on OpenRouter; **Phase 2b** — local SigLIP image embeddings in pgvector, powering "related buildings" on detail pages; **Phase 2c** — visitor upload-and-analyze (upload a building photo → AI analysis → nearest catalog matches), via the `apps/api` inference service behind the web BFF; **`apps/worker`** — the long-running poller that auto-discovers and enriches new S3 objects (using the database as its work queue), replacing manual runs of the one-off scripts; **`packages/imgcore-node` / `imgcore-wasm`** — a C++ image-processing core (perceptual hashing, with dominant color and gradient feature vectors planned) built as both a Node N-API addon and a WebAssembly module from one CMake source tree.
+- **imgcore** — dominant-color and gradient feature vectors on top of the existing perceptual hashing.
 
 ## License
 
