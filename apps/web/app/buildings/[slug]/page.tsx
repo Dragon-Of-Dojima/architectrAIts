@@ -54,15 +54,31 @@ export default async function BuildingPage({
   // 4. Return the detail layout: big image + metadata.
   return (
 	<main className="max-w-4xl mx-auto p-6">
-		<div className="relative aspect-[3/2]">
-		<Image src={page} alt={building.title} fill sizes="(max-width: 768px) 100vw, 768px" className="object-cover" />
+		<Link href="/catalog" className="text-sm underline">← Back to catalog</Link>
+		<div className="relative w-full aspect-[3/2] mt-4 overflow-hidden rounded-lg bg-gray-100">
+		<Image src={page} alt={building.title} fill sizes="(max-width: 768px) 100vw, 768px" className="object-cover" priority />
 		</div>
-		<h1 className="mt-4 text-2xl font-semibold">{building.title}</h1>
-		{/* conditionally render metadata that exists: */}
-		{building.era && <p>Era: {building.era}</p>}
-		{building.primaryStyle && <p>Style: {building.primaryStyle}</p>}
+		<h1 className="mt-6 text-3xl font-bold tracking-tight">Original file name: {building.title}</h1>
+		{[building.primaryStyle, building.era, building.yearBuiltEstimate ? `~${building.yearBuiltEstimate}` : null]
+			.filter(Boolean).length > 0 && (
+			<p className="mt-1 text-sm text-gray-500">
+				{[building.primaryStyle, building.era, building.yearBuiltEstimate ? `Built ~${building.yearBuiltEstimate}` : null]
+					.filter(Boolean)
+					.join(' · ')}
+			</p>
+		)}
 		{building.description && <p className="mt-4 leading-relaxed">{building.description}</p>}
-		{building.yearBuiltEstimate && <p>Built ~{building.yearBuiltEstimate}</p>}
+		{(building.sourceUrl || building.license) && (
+			<p className="mt-4 text-sm text-gray-500">
+				{building.sourceUrl && (
+					<a href={building.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">
+						Source
+					</a>
+				)}
+				{building.sourceUrl && building.license && ' · '}
+				{building.license && <span>{building.license}</span>}
+			</p>
+		)}
 		{related.length > 0 && (
 			<section className="mt-10">
 				<h2 className="text-xl font-semibold mb-4">Related buildings</h2>
@@ -79,7 +95,6 @@ export default async function BuildingPage({
 				</div>
 			</section>
 		)}
-		{/* sourceUrl as a link, license as text, etc. */}
 	</main>
   );
 }

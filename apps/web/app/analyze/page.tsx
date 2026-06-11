@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import AnalysisResults, { type AnalysisResponse } from './AnalysisResults';
+import Spinner from '../components/Spinner';
 
 // Keep in sync with the server-side cap (express.raw limit in apps/api). The
 // server stays authoritative; this is a fast-fail so users don't upload a
@@ -56,11 +57,14 @@ export default function AnalyzePage() {
 	return (
 		<main className="max-w-4xl mx-auto p-6">
 			<h1 className="text-2xl font-semibold mb-4">Analyze a building photo</h1>
-			<input type="file" accept="image/*" onChange={onFileChange} />
+			<label className="inline-block cursor-pointer rounded-md border border-gray-300 px-5 py-2.5 text-sm font-medium transition hover:bg-gray-100 hover:text-gray-900">
+				Choose a photo
+				<input type="file" accept="image/*" onChange={onFileChange} className="sr-only" />
+			</label>
 			{/* blob: preview -> plain <img>, since next/image can't optimize blob URLs */}
 			{preview && <img src={preview} alt="Your upload" className="mt-6 max-h-80 rounded" />}
 
-			{status === 'loading' && <p className="mt-6">Analyzing…</p>}
+			{status === 'loading' && <Spinner label="Analyzing…" className="mt-6" />}
 			{status === 'error' && <p className="mt-6 text-red-600">{errorMsg}</p>}
 			
 			{result && <AnalysisResults data={result} />}

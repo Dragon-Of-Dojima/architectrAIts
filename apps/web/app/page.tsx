@@ -1,37 +1,27 @@
-import { eq } from 'drizzle-orm';
-import { db, buildings, images } from 'architectraits-db';
-import Image from 'next/image';
 import Link from 'next/link';
-import { getPresignedImageUrl } from 'architectraits-storage';
 
-export const dynamic = 'force-dynamic';
-
-export default async function Home() {
-  // 1. Query: buildings leftJoin images, ordered by title.
-	const rows = await db.select({
-		id: buildings.id,
-		title: buildings.title,
-		slug: buildings.slug,
-		s3Key: images.s3Key,
-	}).from(buildings).innerJoin(images, eq(images.buildingId, buildings.id)).orderBy(buildings.title);
-
-  // 2. Presign every row's s3Key in parallel.
-	const cards = await Promise.all(rows.map(async (row) => ({ ...row, url: await getPresignedImageUrl(row.s3Key) })));
-
-  // 3. Return the grid.
-  return (
-    <main id="wrapper" className="max-w-7xl mx-auto">
-	<Link href="/analyze" className="underline">Analyze your own photo →</Link>
-	 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-	   {cards.map(card => (
-		    <Link key={card.id} href={`/buildings/${card.slug}`}>
-			 <div className="relative aspect-[4/3]">
-			   <Image src={card.url} alt={card.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
-			 </div>
-			 <p>{card.title}</p>
-		    </Link>
-	   )) }
-	 </div>
-    </main>
-  );
+export default function Home() {
+	return (
+		<main className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center px-6 py-16 text-center">
+			<h1 className="text-4xl font-bold tracking-tight sm:text-5xl">ArchitectrAIts</h1>
+			<p className="mt-4 max-w-xl text-gray-500">
+				An AI-powered catalog of traditional architecture. Browse the collection, or upload
+				your own photo to identify its style and find the closest matches.
+			</p>
+			<div className="mt-8 flex flex-col gap-3 sm:flex-row">
+				<Link
+					href="/catalog"
+					className="rounded-md border border-gray-300 px-5 py-2.5 text-sm font-medium transition hover:bg-gray-100 hover:text-gray-900"
+				>
+					Catalog Analysis
+				</Link>
+				<Link
+					href="/analyze"
+					className="rounded-md border border-gray-300 px-5 py-2.5 text-sm font-medium transition hover:bg-gray-100 hover:text-gray-900"
+				>
+					Analyze Your Photo
+				</Link>
+			</div>
+		</main>
+	);
 }
