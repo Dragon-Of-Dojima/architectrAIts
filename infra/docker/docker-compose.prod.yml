@@ -1,5 +1,5 @@
 # Production stack for a single Lightsail instance:
-#   Postgres (pgvector) + Redis + Next app (standalone).
+#   Postgres (pgvector) + Next app (standalone) + api + worker.
 #
 # TLS/ingress is handled by the host's existing nginx, which reverse-proxies the
 # subdomain to the web container published on 127.0.0.1:3300 (see infra/nginx/).
@@ -47,19 +47,6 @@ services:
       - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-architect} -d ${POSTGRES_DB:-architectraits}']
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: architectraits-redis
-    restart: unless-stopped
-    command: ['redis-server', '--appendonly', 'yes']
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -116,6 +103,34 @@ services:
     volumes:
       - hf_cache:/app/.hf-cache
     command: ['sh', '-c', 'pnpm --filter api exec tsx src/index.ts']
+
+  # Long-running ingest worker. Polls S3 on an interval and uses the database
+  # (nullable enrichment columns) as its work queue: discovers new catalog
+  # objects, then fills descriptions (OpenRouter), embeddings (local SigLIP),
+  # and dHashes (imgcore addon). Idempotent — every step is additive. This
+  # automates what the on-demand ingest/embed/dhash tools do manually.
+  #
+  # Uses the build image + tsx like api. Shares the hf_cache volume since it
+  # loads the same ~350MB SigLIP model resident (alongside api's copy) — fine
+  # on the 4GB box with swap. Internal only: no ports. Tune the cadence with
+  # WORKER_POLL_INTERVAL_MS (default 60000).
+  worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: build
+    container_name: architectraits-worker
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+      HF_CACHE_DIR: /app/.hf-cache
+    volumes:
+      - hf_cache:/app/.hf-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['sh', '-c', 'pnpm --filter architectraits-worker exec tsx src/index.ts']
 
   # Run on demand only (profile: tools). Uses the build image, which has the
   # source + dev deps (drizzle-kit, tsx) needed for migrations + seeding.
@@ -202,5 +217,4 @@ services:
 
 volumes:
   pg_data:
-  redis_data:
   hf_cache:

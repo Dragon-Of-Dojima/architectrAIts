@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/web/package.json ./apps/web/
 COPY apps/api/package.json ./apps/api/
+COPY apps/worker/package.json ./apps/worker/
 COPY packages/db/package.json ./packages/db/
 COPY packages/storage/package.json ./packages/storage/
 COPY packages/shared/package.json ./packages/shared/

@@ -1,22 +1,7 @@
 import 'dotenv/config';
 import {db, buildings, images} from '../src/index.js';
 import {listCatalogObjects} from 'architectraits-storage';
-
-function deriveTitle(key: string): string{
-	let itemToReturn = key.split('/').pop() ?? key;
-	itemToReturn = itemToReturn.replace(/\.[^.]+$/, '');
-	itemToReturn = itemToReturn.replace(/[-_]+/g, ' ');
-	itemToReturn = itemToReturn.split(' ').map((word)=> word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-	return itemToReturn;
-}
-function slugify(key: string): string{
-	let itemToReturn = key.split('/').pop() ?? key;
-	itemToReturn = itemToReturn.replace(/\.[^.]+$/, '');
-	itemToReturn = itemToReturn.toLowerCase();
-	itemToReturn = itemToReturn.replace(/[^a-z0-9]+/g, '-');
-	itemToReturn = itemToReturn.replace(/^-+|-+$/g, '');
-	return itemToReturn;
-}
+import {deriveTitle, slugify} from '../src/catalog.js';
 
 async function seed(){
 	const keys = await listCatalogObjects();
