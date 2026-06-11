@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Native addon (needed by the node smoke test below).
+      - run: pnpm --filter architectraits-imgcore-node run rebuild
+
+      - run: pnpm -r run typecheck
+
+      # Pure C++ core: configure, build, run ctest.
+      - run: cmake -S packages/imgcore -B packages/imgcore/build
+      - run: cmake --build packages/imgcore/build
+      - run: ctest --test-dir packages/imgcore/build --output-on-failure
+
+      # Node addon smoke test (asserts known dHash hex outputs).
+      - run: node packages/imgcore-node/smoke.cjs
