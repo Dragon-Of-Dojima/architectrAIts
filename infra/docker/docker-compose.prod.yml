@@ -25,7 +25,12 @@
 #
 #   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm embed
 #
-# Full run order on a fresh box:  migrator (migrate + seed) -> ingest -> embed
+# One-off image dHash dup report (Phase 2c). Run AFTER migrator (needs the
+# images.dhash column from migration 0003). Reports near-duplicates only:
+#
+#   docker compose -f infra/docker/docker-compose.prod.yml --env-file infra/docker/.env.prod --profile tools run --rm dhash
+#
+# Full run order on a fresh box:  migrator (migrate + seed) -> ingest -> embed -> dhash
 
 services:
   postgres:
@@ -175,6 +180,25 @@ services:
       postgres:
         condition: service_healthy
     command: ['sh', '-c', 'pnpm --filter architectraits-db embed']
+
+  # Run on demand only (profile: tools). Computes a perceptual dHash for every
+  # catalog image and reports near-duplicate pairs (Hamming distance <= 5).
+  # Idempotent / read-only-ish, safe to re-run. Run AFTER migrator (needs the
+  # images.dhash column from migration 0003). Uses the build image, which now
+  # compiles the imgcore-node addon that shared/imgcore depends on.
+  dhash:
+    profiles: ['tools']
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: build
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-architect}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-architectraits}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['sh', '-c', 'pnpm --filter architectraits-db dhash']
 
 volumes:
   pg_data:
