@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import LinkButton from '../../components/LinkButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,22 +55,25 @@ export default async function BuildingPage({
   // 4. Return the detail layout: big image + metadata.
   return (
 	<main className="max-w-4xl mx-auto p-6">
-		<Link href="/catalog" className="text-sm underline">← Back to catalog</Link>
+		<div className="flex flex-wrap gap-3">
+			<LinkButton href="/">Home</LinkButton>
+			<LinkButton href="/catalog">← Back to catalog</LinkButton>
+		</div>
 		<div className="relative w-full aspect-[3/2] mt-4 overflow-hidden rounded-lg bg-gray-100">
 		<Image src={page} alt={building.title} fill sizes="(max-width: 768px) 100vw, 768px" className="object-cover" priority />
 		</div>
-		<h1 className="mt-6 text-3xl font-bold tracking-tight">Original file name: {building.title}</h1>
 		{[building.primaryStyle, building.era, building.yearBuiltEstimate ? `~${building.yearBuiltEstimate}` : null]
 			.filter(Boolean).length > 0 && (
-			<p className="mt-1 text-sm text-gray-500">
+			<p className="mt-6 font-serif text-2xl italic">
 				{[building.primaryStyle, building.era, building.yearBuiltEstimate ? `Built ~${building.yearBuiltEstimate}` : null]
 					.filter(Boolean)
 					.join(' · ')}
 			</p>
 		)}
+		<h1 className="mt-1 font-serif text-lg font-semibold text-muted">Original file name: {building.title}</h1>
 		{building.description && <p className="mt-4 leading-relaxed">{building.description}</p>}
 		{(building.sourceUrl || building.license) && (
-			<p className="mt-4 text-sm text-gray-500">
+			<p className="mt-4 text-sm text-muted">
 				{building.sourceUrl && (
 					<a href={building.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">
 						Source
@@ -81,7 +85,7 @@ export default async function BuildingPage({
 		)}
 		{related.length > 0 && (
 			<section className="mt-10">
-				<h2 className="text-xl font-semibold mb-4">Related buildings</h2>
+				<h2 className="font-serif text-xl font-semibold mb-4">Related buildings</h2>
 				<div className="grid grid-cols-2 md:grid-cols-3 gap-4">
 					{related.map((r) => (
 						<Link key={r.slug} href={`/buildings/${r.slug}`} className="block group">
